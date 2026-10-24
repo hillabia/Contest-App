@@ -46,6 +46,7 @@ export default function AdminPage(){
    <button onClick={()=>action("rounds/finalize",{contestId})}>Finalizar rondas</button>
    <button onClick={()=>action("reveal",{contestId})}>Revelar ganadores</button>
    <p><a href={"/podio?contestId="+encodeURIComponent(contestId)}>Ver podio público</a></p>
+   <h2>5. Eliminar concurso</h2><p>La eliminación definitiva requiere confirmar la identidad, borrar las fotografías y comprobar la limpieza de la base de datos. Esta función permanece deshabilitada hasta que el procedimiento seguro esté implementado y validado.</p><button disabled title="Pendiente de procedimiento de eliminación verificable">Eliminar concurso</button>
    <pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}} role="status">{result}</pre>
   </>}
  </main>;
