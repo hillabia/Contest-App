@@ -1,11 +1,11 @@
 import { randomBytes, createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { isAdminAuthorized } from "@/infrastructure/auth/admin";
+import { requireAdmin } from "@/infrastructure/auth/admin-session";
 import { serverDatabase } from "@/infrastructure/supabase/server";
 const schema=z.object({contestId:z.string().uuid(),count:z.number().int().min(1).max(25)});
 export async function POST(request:Request){
- if(!isAdminAuthorized(request)) return NextResponse.json({error:"No autorizado"},{status:401});
+ if(!await requireAdmin(request)) return NextResponse.json({error:"No autorizado"},{status:401});
  let parsed;
  try{parsed=schema.safeParse(await request.json());}catch{return NextResponse.json({error:"JSON inválido"},{status:400});}
  if(!parsed.success)return NextResponse.json({error:"Solicitud inválida"},{status:400});
