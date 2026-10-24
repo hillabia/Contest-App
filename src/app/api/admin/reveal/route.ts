@@ -1,11 +1,18 @@
-import { NextResponse } from "next/server";
-import { z } from "zod";
-import { requireAdmin } from "@/infrastructure/auth/admin-session";
+import {NextResponse} from "next/server";
+import {z} from "zod";
+import {requireAdmin} from "@/infrastructure/auth/admin-session";
+import {serverDatabase} from "@/infrastructure/supabase/server";
+import {readPodium} from "@/infrastructure/supabase/podium-reader";
 const schema=z.object({contestId:z.string().uuid()});
 export async function POST(request:Request){
  if(!await requireAdmin(request))return NextResponse.json({error:"No autorizado"},{status:401});
  let parsed;try{parsed=schema.safeParse(await request.json());}catch{return NextResponse.json({error:"JSON inválido"},{status:400});}
  if(!parsed.success)return NextResponse.json({error:"Concurso inválido"},{status:400});
- // Do not reveal until server-side podium ties have been resolved.
- return NextResponse.json({error:"La revelación requiere verificar que no queden empates; todavía no está habilitada."},{status:501});
+ try{
+  const podium=await readPodium(parsed.data.contestId);
+  if(podium.unresolved.length)return NextResponse.json({error:"Existen empates pendientes"},{status:409});
+  const {error}=await serverDatabase().rpc("reveal_contest",{p_contest_id:parsed.data.contestId});
+  if(error)throw error;
+  return NextResponse.json({revealed:true,podium:podium.podium},{headers:{"Cache-Control":"no-store"}});
+ }catch{return NextResponse.json({error:"No se pudo revelar el concurso"},{status:409});}
 }
