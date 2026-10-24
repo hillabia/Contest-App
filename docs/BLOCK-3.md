@@ -1,19 +1,28 @@
 # Block 3 — MVP administration and contest lifecycle
 
-Development branch: `feature/mvp-admin-lifecycle`, based on `feature/results-rounds` (PR #2).
+Development branch: `feature/mvp-admin-lifecycle`, based on PR #2.
 
 ## Implemented
-- Server-only constant-time comparison for an administrator API token (minimum 32 characters), default deny.
-- Protected contest creation endpoint with strict input and date validation.
-- Protected regular-round start endpoint that delegates the atomic transition to PostgreSQL.
-- SQL migration for atomic initial-round creation.
+- Verified Supabase Auth identity against the single configured administrator user ID (`CONTEST_ADMIN_USER_ID`) in all administrative API routes.
+- Protected contest creation, guest access-code issuance, regular round start and deadline-based close.
+- Atomic SQL transitions for regular round start and round close, applied and permissions verified in `contest-app-dev`.
+- Protected server-side results and podium tie preview.
+- Pure lifecycle policies and unit tests.
 
-## Temporary authentication model
-The `CONTEST_ADMIN_API_TOKEN` environment variable must be a high-entropy secret, set only on the server. The current routes require an `Authorization: Bearer ...` header. **Do not put this token in browser code, local storage or a public environment variable.** A proper single-admin login and short-lived session must replace this temporary API gate before public deployment.
+## Security and deployment
+- Configure `CONTEST_ADMIN_USER_ID` to the administrator's Supabase Auth UUID. Do not expose `SUPABASE_SERVICE_ROLE_KEY` to browsers.
+- The old token helper is superseded and should be removed before release.
+- A browser login and session workflow remains to be implemented.
+- The new SQL for tie-break/finalize/reveal is committed for review but has **not** been applied to Supabase.
+- The tie-break and reveal endpoints currently return 501 intentionally; do not bypass this guard.
+- No end-to-end tests or CI validation have been confirmed.
 
-## Still pending
-- Single-admin login and session UI; guest code generation.
-- Admin UI for configuring contests and tiebreaks.
-- Transactional close, tie-break orchestration and final results composition.
-- Reveal endpoint, podium UI, full-data deletion with storage cleanup and audit.
-- End-to-end tests, abuse prevention, deployment.
+## Critical MVP blockers
+1. Transactional server verification of which podium ties require a tie-break and how multiple tie-breaks compose final rankings.
+2. Reveal and finalization only when all rounds have closed and all podium ties have been resolved.
+3. Public podium UI with name reveal and signed image links.
+4. Confirmed, retryable purge of storage objects and related database rows.
+5. Single-admin login and session UI.
+6. End-to-end integration tests, rate limiting, lockfile and production deployment.
+
+Do not mark this PR ready for merge until all critical blockers are addressed and tests pass.
