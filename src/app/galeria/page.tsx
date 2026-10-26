@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import {useEffect,useState} from "react";
 type Photo={id:string;url:string};
 export default function Gallery(){
@@ -13,6 +14,6 @@ export default function Gallery(){
    if(!cancelled){setPhotos(data.photos);setMessage(data.photos.length?"":"Aún no hay fotografías.");}
   }catch{if(!cancelled)setMessage("No se pudo cargar la galería.");}
  })();return()=>{cancelled=true};},[]);
- return <main style={{maxWidth:900,margin:"3rem auto",padding:"1rem",fontFamily:"sans-serif"}}><a href="/">← Inicio</a><h1>Galería anónima</h1>
+ return <main style={{maxWidth:900,margin:"3rem auto",padding:"1rem",fontFamily:"sans-serif"}}><Link href="/">← Inicio</Link><h1>Galería anónima</h1>
  {photos.length?<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:16}}>{photos.map(p=><img key={p.id} src={p.url} alt="Diseño participante" style={{width:"100%",aspectRatio:"1",objectFit:"cover",borderRadius:12}}/>)}</div>:<p>{message}</p>}</main>;
 }

@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useState, type FormEvent } from "react";
 export default function Participate(){
  const [name,setName]=useState("");const [photo,setPhoto]=useState<File|null>(null);const [code,setCode]=useState("");const [error,setError]=useState("");const [busy,setBusy]=useState(false);
@@ -18,7 +19,7 @@ export default function Participate(){
   }catch(e){setError(e instanceof Error?e.message:"Error inesperado");}finally{setBusy(false);}
  }
  return <main style={{maxWidth:560,margin:"3rem auto",padding:"1rem",fontFamily:"sans-serif"}}>
-  <a href="/">← Inicio</a><h1>Participar</h1>
+  <Link href="/">← Inicio</Link><h1>Participar</h1>
   {code?<section><h2>Registro completado</h2><p>Guarda este código. No volverá a mostrarse.</p><strong style={{overflowWrap:"anywhere"}}>{code}</strong></section>:
   <form onSubmit={submit}><p><label>Nombre<br/><input required minLength={2} maxLength={80} value={name} onChange={e=>setName(e.target.value)}/></label></p>
   <p><label>Fotografía (JPG, PNG o WebP, máximo 5 MB)<br/><input type="file" accept="image/jpeg,image/png,image/webp" required onChange={e=>setPhoto(e.target.files?.[0]??null)}/></label></p>

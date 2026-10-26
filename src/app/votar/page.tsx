@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useState } from "react";
 type Photo={id:string;url:string};
 export default function Vote(){
@@ -27,7 +28,7 @@ export default function Vote(){
   }catch(e){setError(e instanceof Error?e.message:"Error");}finally{setBusy(false);}
  }
  return <main style={{maxWidth:760,margin:"3rem auto",padding:"1rem",fontFamily:"sans-serif"}}>
- <a href="/">← Inicio</a><h1>Votar</h1>
+ <Link href="/">← Inicio</Link><h1>Votar</h1>
  {done?<p>¡Voto registrado! No se puede modificar.</p>:<>
  {!roundId?<section><p>Introduce tu código individual para ver las fotografías que puedes calificar.</p>
  <label>Código de acceso <input type="password" autoComplete="off" value={code} onChange={e=>setCode(e.target.value)}/></label>
