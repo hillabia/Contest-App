@@ -9,7 +9,8 @@ function localDate(value:string){const d=new Date(value);if(Number.isNaN(d.getTi
 export default function AdminPage(){
  const [email,setEmail]=useState("");const [password,setPassword]=useState("");const [token,setToken]=useState("");
  const [contestId,setContestId]=useState("");const [title,setTitle]=useState("");const [registrationEndsAt,setRegistrationEndsAt]=useState("");const [votingEndsAt,setVotingEndsAt]=useState("");
- const [roundId,setRoundId]=useState("");const [duration,setDuration]=useState(30);const [entryIds,setEntryIds]=useState("");
+ const [roundId,setRoundId]=useState("");const [duration,setDuration]=useState(30);
+ const [ties,setTies]=useState<string[][]>([]);const [selectedTie,setSelectedTie]=useState(-1);const [loadingTies,setLoadingTies]=useState(false);
  const [result,setResult]=useState("");const [codes,setCodes]=useState<string[]>([]);
  const [entries,setEntries]=useState<Entry[]>([]);const [rounds,setRounds]=useState<Round[]>([]);const [contestStatus,setContestStatus]=useState("");
  async function refreshCurrent(accessToken:string){
@@ -19,7 +20,7 @@ export default function AdminPage(){
   setEntries(data.entries??[]);setRounds(data.rounds??[]);
   if(data.contest){setContestId(data.contest.id);setTitle(data.contest.title);setContestStatus(data.contest.status);
    setRegistrationEndsAt(localDate(data.contest.registration_ends_at));setVotingEndsAt(localDate(data.contest.voting_ends_at));
-   const active=(data.rounds??[])[0];setRoundId(active?.id??"");
+   const active=(data.rounds??[])[0];setRoundId(current=>current&&(data.rounds??[]).some((r:Round)=>r.id===current)?current:active?.id??"");
   }else{setContestId("");setContestStatus("");setRoundId("");}
  }
  async function login(e:React.FormEvent){e.preventDefault();try{
@@ -30,6 +31,17 @@ export default function AdminPage(){
   setToken(data.session.access_token);setPassword("");setResult("Sesión iniciada.");
   try{await refreshCurrent(data.session.access_token);}catch(error){setResult(error instanceof Error?error.message:"No se pudo recuperar el concurso");}
  }catch(e){setResult(String(e));}}
+ async function previewTies(){setLoadingTies(true);setTies([]);setSelectedTie(-1);setResult("");try{
+  if(!roundId)throw new Error("Selecciona una ronda terminada");
+  const response=await fetch("/api/admin/rounds/tiebreak/preview",{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+token},body:JSON.stringify({roundId})});
+  const data=await response.json();if(!response.ok)throw new Error(data.error??"No se pudieron consultar los empates");
+  const groups:string[][]=Array.isArray(data.podiumTies)?data.podiumTies:[];
+  setTies(groups);setSelectedTie(groups.length===1?0:-1);
+  setResult(groups.length?"Selecciona el grupo de participantes empatados.":"Esta ronda no tiene empates de podio.");
+ }catch(e){setResult(e instanceof Error?e.message:String(e));}finally{setLoadingTies(false);}}
+ async function startSelectedTiebreak(){if(selectedTie<0||!ties[selectedTie]){setResult("Selecciona un grupo de empate.");return;}
+  await action("rounds/tiebreak",{contestId,entryIds:ties[selectedTie],durationMinutes:duration});setTies([]);setSelectedTie(-1);
+ }
  async function saveDates(){try{
   if(!registrationEndsAt||!votingEndsAt)throw new Error("Selecciona ambas fechas");
   const response=await fetch("/api/admin/contests/dates",{method:"PATCH",headers:{"Content-Type":"application/json",Authorization:"Bearer "+token},body:JSON.stringify({contestId,registrationEndsAt:new Date(registrationEndsAt).toISOString(),votingEndsAt:new Date(votingEndsAt).toISOString()})});
@@ -47,7 +59,7 @@ export default function AdminPage(){
  return <main style={{maxWidth:800,margin:"3rem auto",padding:20,fontFamily:"sans-serif"}}>
   <h1>Administración del concurso</h1>
   {!token?<form onSubmit={login}><label>Correo del administrador <input type="email" required value={email} onChange={e=>setEmail(e.target.value)}/></label><br/><label>Contraseña <input type="password" required value={password} onChange={e=>setPassword(e.target.value)}/></label><br/><button>Iniciar sesión</button></form>:<>
-   <button onClick={()=>{setToken("");setCodes([]);setEntries([]);setRounds([]);setContestId("");setContestStatus("");}}>Cerrar sesión local</button>
+   <button onClick={()=>{setToken("");setCodes([]);setEntries([]);setRounds([]);setContestId("");setContestStatus("");setTies([]);setSelectedTie(-1);}}>Cerrar sesión local</button>
    <h2>Concurso actual</h2>
    <button type="button" onClick={()=>refreshCurrent(token).catch(e=>setResult(String(e)))}>Actualizar concurso</button>
    {contestId?<section><h3>{title}</h3><p>Estado: <strong>{contestStatus}</strong></p><p>Participantes registrados: {entries.length} · Rondas: {rounds.length}</p>
@@ -56,7 +68,7 @@ export default function AdminPage(){
    <label>Fin de votación <input type="datetime-local" value={votingEndsAt} onChange={e=>setVotingEndsAt(e.target.value)} disabled={contestStatus!=="registration"||rounds.length>0}/></label>
    <button type="button" onClick={saveDates} disabled={contestStatus!=="registration"||rounds.length>0}>Guardar cambios de fechas</button>
    <h3>Competidores</h3>{entries.length?<ul>{entries.map(e=><li key={e.id}>{e.name} — {e.status}</li>)}</ul>:<p>Aún no hay participantes.</p>}
-   <h3>Rondas registradas</h3>{rounds.map(r=><p key={r.id}>Ronda {r.round_number} ({r.kind}) — {r.status} <button type="button" onClick={()=>setRoundId(r.id)}>Seleccionar</button></p>)}
+   <h3>Rondas registradas</h3>{rounds.map(r=><p key={r.id}>Ronda {r.round_number} ({r.kind}) — {r.status} <button type="button" onClick={()=>{setRoundId(r.id);setTies([]);setSelectedTie(-1);}}>Seleccionar</button></p>)}
    <p>Modificar participantes todavía requiere funciones administrativas con validaciones.</p></section>:<p>No hay ningún concurso activo.</p>}
    {!contestId&&<><h2>1. Crear concurso</h2>
    <input placeholder="Título" value={title} onChange={e=>setTitle(e.target.value)}/>
@@ -71,10 +83,12 @@ export default function AdminPage(){
    <h2>3. Rondas</h2><input aria-label="ID de ronda" placeholder="UUID ronda" value={roundId} onChange={e=>setRoundId(e.target.value)}/>
    <button onClick={()=>action("rounds/close",{roundId})}>Cerrar ronda vencida</button>
    <button onClick={()=>action("rounds/results",{roundId})}>Ver resultados privados</button>
-   <button onClick={()=>action("rounds/tiebreak/preview",{roundId})}>Consultar empates</button>
-   <label>IDs empatados separados por coma <input value={entryIds} onChange={e=>setEntryIds(e.target.value)}/></label>
+   <button type="button" disabled={!roundId||loadingTies} onClick={previewTies}>{loadingTies?"Consultando...":"Consultar empates"}</button>
+   {ties.length>0&&<section aria-label="Grupos empatados"><h3>Participantes empatados</h3><p>Selecciona el grupo que deseas llevar a desempate. No hace falta copiar UUID.</p>
+    {ties.map((group,i)=><label key={group.join("-")} style={{display:"block",padding:12,marginBottom:8,border:"1px solid #725080",borderRadius:12}}><input type="radio" name="tie-group" checked={selectedTie===i} onChange={()=>setSelectedTie(i)}/> Grupo {i+1}: {group.map(id=>entries.find(e=>e.id===id)?.name??"Fotografía "+id.slice(0,8)).join(" · ")} ({group.length} participantes)</label>)}
+   </section>}
    <label>Duración en minutos <input type="number" min={5} max={10080} value={duration} onChange={e=>setDuration(Number(e.target.value))}/></label>
-   <button onClick={()=>action("rounds/tiebreak",{contestId,entryIds:entryIds.split(",").map(s=>s.trim()),durationMinutes:duration})}>Iniciar desempate</button>
+   <button type="button" disabled={selectedTie<0||!ties[selectedTie]||!contestId} onClick={startSelectedTiebreak}>Iniciar desempate del grupo seleccionado</button>
    <h2>4. Publicación</h2>
    <button onClick={()=>action("rounds/finalize",{contestId})}>Finalizar rondas</button>
    <button onClick={()=>action("reveal",{contestId})}>Revelar ganadores</button>
