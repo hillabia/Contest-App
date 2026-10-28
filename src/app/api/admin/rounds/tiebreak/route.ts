@@ -7,7 +7,7 @@ const schema=z.object({contestId:z.string().uuid(),entryIds:z.array(z.string().u
 export async function POST(request:Request){
  if(!await requireAdmin(request))return NextResponse.json({error:"No autorizado"},{status:401});
  let parsed;try{parsed=schema.safeParse(await request.json());}catch{return NextResponse.json({error:"JSON inválido"},{status:400});}
- if(!parsed.success)return NextResponse.json({error:"Datos inválidos"},{status:400});
+ if(!parsed.success){const fields=[...new Set(parsed.error.issues.map(issue=>issue.path[0]).filter(Boolean))];return NextResponse.json({error:"Datos inválidos en: "+fields.join(", "),fields},{status:400});}
  const {contestId,entryIds,durationMinutes}=parsed.data;
  if(new Set(entryIds).size!==entryIds.length)return NextResponse.json({error:"Fotografías repetidas"},{status:400});
  try{
