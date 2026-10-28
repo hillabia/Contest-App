@@ -35,12 +35,12 @@ export default function AdminPage(){
   if(!roundId)throw new Error("Selecciona una ronda terminada");
   const response=await fetch("/api/admin/rounds/tiebreak/preview",{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+token},body:JSON.stringify({roundId})});
   const data=await response.json();if(!response.ok)throw new Error(data.error??"No se pudieron consultar los empates");
-  const groups:string[][]=Array.isArray(data.podiumTies)?data.podiumTies:[];
+  const groups:string[][]=Array.isArray(data.podiumTies)?data.podiumTies.filter((item:unknown):item is {entryIds:string[]}=>typeof item==="object"&&item!==null&&"entryIds" in item&&Array.isArray(item.entryIds)&&item.entryIds.length>=2&&item.entryIds.every((id:unknown)=>typeof id==="string")).map((item:{entryIds:string[]})=>item.entryIds):[];
   setTies(groups);setSelectedTie(groups.length===1?0:-1);
   setResult(groups.length?"Selecciona el grupo de participantes empatados.":"Esta ronda no tiene empates de podio.");
  }catch(e){setResult(e instanceof Error?e.message:String(e));}finally{setLoadingTies(false);}}
  async function startSelectedTiebreak(){if(selectedTie<0||!ties[selectedTie]){setResult("Selecciona un grupo de empate.");return;}
-  await action("rounds/tiebreak",{contestId,entryIds:ties[selectedTie],durationMinutes:duration});setTies([]);setSelectedTie(-1);
+  await action("rounds/tiebreak",{contestId,entryIds:ties[selectedTie],durationMinutes:duration});
  }
  async function saveDates(){try{
   if(!registrationEndsAt||!votingEndsAt)throw new Error("Selecciona ambas fechas");
@@ -53,7 +53,7 @@ export default function AdminPage(){
   const data=await response.json();setResult(JSON.stringify(data,null,2));
   if(data.roundId)setRoundId(data.roundId);if(data.codes)setCodes(data.codes);
   if(data.id)setContestId(data.id);
-  if(response.ok)await refreshCurrent(token);
+  if(response.ok){await refreshCurrent(token);if(path==="rounds/tiebreak"){setTies([]);setSelectedTie(-1);}}
   }catch(e){setResult(String(e));}
  }
  return <main style={{maxWidth:800,margin:"3rem auto",padding:20,fontFamily:"sans-serif"}}>
