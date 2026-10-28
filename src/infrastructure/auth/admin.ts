@@ -8,5 +8,7 @@ export function isAdminAuthorized(request: Request): boolean {
  if(!provided?.startsWith("Bearer ")) return false;
  const token=provided.slice(7);
  if(token.length<32 || token.length>512) return false;
- return timingSafeEqual(createHash("sha256").update(token).digest(),createHash("sha256").update(expected).digest());
+ const providedHash = new Uint8Array(createHash("sha256").update(token).digest());
+ const expectedHash = new Uint8Array(createHash("sha256").update(expected).digest());
+ return timingSafeEqual(providedHash, expectedHash);
 }
