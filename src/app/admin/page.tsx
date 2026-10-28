@@ -1,5 +1,7 @@
 "use client";
 import {useState} from "react";
+type Entry={id:string;name:string;status:string;created_at:string};
+type Round={id:string;round_number:number;kind:string;status:string;starts_at:string;ends_at:string};
 import {createClient} from "@supabase/supabase-js";
 const url=process.env.NEXT_PUBLIC_SUPABASE_URL??"";
 const key=process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY??"";
@@ -8,24 +10,43 @@ export default function AdminPage(){
  const [contestId,setContestId]=useState("");const [title,setTitle]=useState("");const [registrationEndsAt,setRegistrationEndsAt]=useState("");const [votingEndsAt,setVotingEndsAt]=useState("");
  const [roundId,setRoundId]=useState("");const [duration,setDuration]=useState(30);const [entryIds,setEntryIds]=useState("");
  const [result,setResult]=useState("");const [codes,setCodes]=useState<string[]>([]);
+ const [entries,setEntries]=useState<Entry[]>([]);const [rounds,setRounds]=useState<Round[]>([]);const [contestStatus,setContestStatus]=useState("");
+ async function refreshCurrent(accessToken:string){
+  const response=await fetch("/api/admin/current",{headers:{Authorization:"Bearer "+accessToken},cache:"no-store"});
+  const data=await response.json();
+  if(!response.ok)throw new Error(data.error??"No se pudo recuperar el concurso");
+  setEntries(data.entries??[]);setRounds(data.rounds??[]);
+  if(data.contest){setContestId(data.contest.id);setTitle(data.contest.title);setContestStatus(data.contest.status);
+   setRegistrationEndsAt(data.contest.registration_ends_at?.slice(0,16)??"");setVotingEndsAt(data.contest.voting_ends_at?.slice(0,16)??"");
+   const active=(data.rounds??[])[0];setRoundId(active?.id??"");
+  }else{setContestId("");setContestStatus("");setRoundId("");}
+ }
  async function login(e:React.FormEvent){e.preventDefault();try{
   if(!url||!key)throw new Error("Configura las variables públicas de Supabase");
   const db=createClient(url,key);
   const {data,error}=await db.auth.signInWithPassword({email,password});
   if(error||!data.session)throw error??new Error("Sesión inválida");
-  setToken(data.session.access_token);setPassword("");setResult("Sesión iniciada. Token de sesión solo en memoria.");
+  setToken(data.session.access_token);setPassword("");setResult("Sesión iniciada.");
+  try{await refreshCurrent(data.session.access_token);}catch(error){setResult(error instanceof Error?error.message:"No se pudo recuperar el concurso");}
  }catch(e){setResult(String(e));}}
  async function action(path:string,body:Record<string,unknown>){
   try{const response=await fetch("/api/admin/"+path,{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+token},body:JSON.stringify(body)});
   const data=await response.json();setResult(JSON.stringify(data,null,2));
   if(data.roundId)setRoundId(data.roundId);if(data.codes)setCodes(data.codes);
   if(data.id)setContestId(data.id);
+  if(response.ok)await refreshCurrent(token);
   }catch(e){setResult(String(e));}
  }
  return <main style={{maxWidth:800,margin:"3rem auto",padding:20,fontFamily:"sans-serif"}}>
   <h1>Administración del concurso</h1>
   {!token?<form onSubmit={login}><label>Correo del administrador <input type="email" required value={email} onChange={e=>setEmail(e.target.value)}/></label><br/><label>Contraseña <input type="password" required value={password} onChange={e=>setPassword(e.target.value)}/></label><br/><button>Iniciar sesión</button></form>:<>
-   <button onClick={()=>{setToken("");setCodes([]);}}>Cerrar sesión local</button>
+   <button onClick={()=>{setToken("");setCodes([]);setEntries([]);setRounds([]);setContestId("");setContestStatus("");}}>Cerrar sesión local</button>
+   <h2>Concurso actual</h2>
+   <button type="button" onClick={()=>refreshCurrent(token).catch(e=>setResult(String(e)))}>Actualizar concurso</button>
+   {contestId?<section><h3>{title}</h3><p>Estado: <strong>{contestStatus}</strong></p><p>Participantes registrados: {entries.length} · Rondas: {rounds.length}</p>
+   <h3>Competidores</h3>{entries.length?<ul>{entries.map(e=><li key={e.id}>{e.name} — {e.status}</li>)}</ul>:<p>Aún no hay participantes.</p>}
+   <h3>Rondas registradas</h3>{rounds.map(r=><p key={r.id}>Ronda {r.round_number} ({r.kind}) — {r.status} <button type="button" onClick={()=>setRoundId(r.id)}>Seleccionar</button></p>)}
+   <p>Modificar participantes o fechas todavía requiere funciones administrativas con validaciones; no se alteran las reglas del concurso desde esta vista.</p></section>:<p>No hay ningún concurso activo.</p>}
    <h2>1. Crear concurso</h2>
    <input placeholder="Título" value={title} onChange={e=>setTitle(e.target.value)}/>
    <label>Fin de registro <input type="datetime-local" value={registrationEndsAt} onChange={e=>setRegistrationEndsAt(e.target.value)}/></label>
