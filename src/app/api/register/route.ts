@@ -1,4 +1,4 @@
-import { randomBytes, createHash } from "node:crypto";
+import { randomBytes, createHash, randomUUID } from "node:crypto";
 import sharp from "sharp";
 import { NextResponse } from "next/server";
 import { RegisterEntry } from "@/application/use-cases/register-entry";
@@ -6,30 +6,101 @@ import { SupabaseContestRepository } from "@/infrastructure/supabase/contest-rep
 import { SupabaseRegistrationRepository } from "@/infrastructure/supabase/registration-repository";
 import { serverDatabase } from "@/infrastructure/supabase/server";
 import { validateDisplayName } from "@/domain/services/registration";
+
 export const runtime = "nodejs";
+const MAX_FILE_SIZE = 5_000_000;
+const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp"];
+type ErrorCode = "FILE_TOO_LARGE" | "INVALID_FILE_TYPE" | "INVALID_FILE" | "EMPTY_FILE" | "IMAGE_PROCESSING_ERROR" | "IMAGE_TOO_MANY_PIXELS" |
+  "REGISTRATION_CLOSED" | "INVALID_NAME" | "INVALID_CONTEST" | "PHOTO_STORAGE_ERROR" | "STORAGE_LIMIT_EXCEEDED" | "REGISTRATION_ERROR" | "UPLOAD_ERROR" | "SERVICE_UNAVAILABLE";
+const messages: Record<ErrorCode, string> = {
+  FILE_TOO_LARGE: "La fotografía supera el límite de 5 MB. Reduce su tamaño o calidad e inténtalo de nuevo. También puedes probar desde una computadora.",
+  INVALID_FILE_TYPE: "El formato no es compatible. Selecciona una imagen JPG, PNG o WebP. Si usas iPhone, exporta la foto como JPG antes de subirla.",
+  INVALID_FILE: "No se recibió una fotografía válida. Selecciona otra imagen.",
+  EMPTY_FILE: "La fotografía seleccionada está vacía. Elige otra imagen.",
+  IMAGE_TOO_MANY_PIXELS: "La fotografía tiene demasiada resolución. Reduce sus dimensiones o calidad e inténtalo de nuevo.",
+  IMAGE_PROCESSING_ERROR: "No pudimos procesar esta imagen. Prueba con una versión de menor resolución o expórtala como JPG. También puedes intentar desde una computadora.",
+  REGISTRATION_CLOSED: "Las inscripciones del concurso ya están cerradas.",
+  INVALID_NAME: "El nombre debe tener entre 2 y 80 caracteres.",
+  INVALID_CONTEST: "No encontramos el concurso. Actualiza la página e inténtalo de nuevo.",
+  PHOTO_STORAGE_ERROR: "No pudimos guardar la fotografía. Inténtalo de nuevo; si persiste, prueba desde una computadora.",
+  STORAGE_LIMIT_EXCEEDED: "La imagen procesada supera el límite de 5 MB. Reduce su calidad o resolución.",
+  SERVICE_UNAVAILABLE: "El servicio no está disponible temporalmente. Inténtalo nuevamente en unos minutos.",
+  REGISTRATION_ERROR: "No pudimos completar el registro. Inténtalo de nuevo en unos momentos.",
+  UPLOAD_ERROR: "No fue posible recibir la fotografía. Comprueba tu conexión, reduce el tamaño de la imagen o intenta desde una computadora."
+};
+function failure(code: ErrorCode, status: number, requestId: string) {
+  return NextResponse.json({ code, error: messages[code], requestId }, { status, headers: { "Cache-Control": "no-store" } });
+}
 export async function POST(request: Request) {
+  const requestId = randomUUID();
   let imagePath: string | null = null;
+  let uploaded = false;
+  let stage = "receive";
   try {
-    const form = await request.formData();
-    const contestId = String(form.get("contestId") ?? "");
-    const name = validateDisplayName(String(form.get("name") ?? ""));
-    const file = form.get("photo");
-    if (!/^[0-9a-f-]{36}$/i.test(contestId) || !(file instanceof File) || file.size === 0 || file.size > 5_000_000 || !["image/jpeg","image/png","image/webp"].includes(file.type)) {
-      return NextResponse.json({error:"Datos o fotografía inválidos (máximo 5 MB)."}, {status:400});
+    let form: FormData;
+    try { form = await request.formData(); }
+    catch (error) {
+      console.error("Photo registration: multipart parse failed", { requestId, stage, error });
+      return failure("UPLOAD_ERROR", 400, requestId);
     }
-    const contest = await new SupabaseContestRepository().findById(contestId);
-    if (!contest || contest.phase !== "registration" || new Date() >= contest.registrationEndsAt) return NextResponse.json({error:"Inscripciones cerradas."},{status:409});
-    const image = await sharp(Buffer.from(await file.arrayBuffer()),{limitInputPixels:20_000_000}).rotate().resize({width:1400,height:1400,fit:"inside",withoutEnlargement:true}).webp({quality:82}).toBuffer();
-    imagePath = `${contestId}/${crypto.randomUUID()}.webp`;
+    const contestId = String(form.get("contestId") ?? "");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(contestId)) return failure("INVALID_CONTEST", 400, requestId);
+    let name: string;
+    try { name = validateDisplayName(String(form.get("name") ?? "")); }
+    catch { return failure("INVALID_NAME", 400, requestId); }
+    const file = form.get("photo");
+    if (!(file instanceof File)) return failure("INVALID_FILE", 400, requestId);
+    if (!file.size) return failure("EMPTY_FILE", 400, requestId);
+    if (file.size > MAX_FILE_SIZE) return failure("FILE_TOO_LARGE", 413, requestId);
+    if (!ACCEPTED_TYPES.includes(file.type)) return failure("INVALID_FILE_TYPE", 415, requestId);
+
+    stage = "contest";
+    let contest;
+    try { contest = await new SupabaseContestRepository().findById(contestId); }
+    catch (error) { console.error("Photo registration: contest query failed", { requestId, error }); return failure("SERVICE_UNAVAILABLE", 503, requestId); }
+    if (!contest || contest.phase !== "registration" || new Date() >= contest.registrationEndsAt) return failure("REGISTRATION_CLOSED", 409, requestId);
+
+    stage = "process";
+    let image: Buffer;
+    try {
+      image = await sharp(Buffer.from(await file.arrayBuffer()), { limitInputPixels: 20_000_000 })
+        .rotate().resize({ width: 1400, height: 1400, fit: "inside", withoutEnlargement: true })
+        .webp({ quality: 82 }).toBuffer();
+    } catch (error) {
+      console.error("Photo registration: image processing failed", { requestId, stage, error });
+      const tooManyPixels = error instanceof Error && /pixel limit|input image exceeds pixel limit/i.test(error.message);
+      return failure(tooManyPixels ? "IMAGE_TOO_MANY_PIXELS" : "IMAGE_PROCESSING_ERROR", 422, requestId);
+    }
+
+    if (image.length > MAX_FILE_SIZE) return failure("STORAGE_LIMIT_EXCEEDED", 413, requestId);
+    imagePath = `${contestId}/${randomUUID()}.webp`;
+    stage = "storage";
     const db = serverDatabase();
-    const upload = await db.storage.from("contest-photos").upload(imagePath,image,{contentType:"image/webp",upsert:false});
-    if(upload.error) throw upload.error;
+    const upload = await db.storage.from("contest-photos").upload(imagePath, image, { contentType: "image/webp", upsert: false });
+    if (upload.error) {
+      console.error("Photo registration: storage failed", { requestId, stage, error: upload.error });
+      return failure("PHOTO_STORAGE_ERROR", 503, requestId);
+    }
+    uploaded = true;
+
+    stage = "database";
     const code = randomBytes(12).toString("base64url");
     const codeHash = createHash("sha256").update(code).digest("hex");
-    await new RegisterEntry(new SupabaseContestRepository(),new SupabaseRegistrationRepository()).execute({contestId,name,imagePath,codeHash});
-    return NextResponse.json({code},{status:201,headers:{"Cache-Control":"no-store"}});
-  } catch(e) {
-    if(imagePath) await serverDatabase().storage.from("contest-photos").remove([imagePath]).catch(()=>{});
-    return NextResponse.json({error:e instanceof Error && /inscripciones|nombre/i.test(e.message)?e.message:"No se pudo completar el registro."},{status:400});
+    await new RegisterEntry(new SupabaseContestRepository(), new SupabaseRegistrationRepository())
+      .execute({ contestId, name, imagePath, codeHash });
+    uploaded = false;
+    return NextResponse.json({ code }, { status: 201, headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    console.error("Photo registration: failed", { requestId, stage, error });
+    return failure(stage === "storage" ? "PHOTO_STORAGE_ERROR" : stage === "receive" ? "UPLOAD_ERROR" : "REGISTRATION_ERROR", 503, requestId);
+  } finally {
+    if (uploaded && imagePath) {
+      try {
+        const { error } = await serverDatabase().storage.from("contest-photos").remove([imagePath]);
+        if (error) console.error("Photo registration: cleanup failed", { requestId, error });
+      } catch (error) {
+        console.error("Photo registration: cleanup exception", { requestId, error });
+      }
+    }
   }
 }
