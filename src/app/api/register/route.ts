@@ -10,17 +10,21 @@ import { validateDisplayName } from "@/domain/services/registration";
 export const runtime = "nodejs";
 const MAX_FILE_SIZE = 5_000_000;
 const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp"];
-type ErrorCode = "FILE_TOO_LARGE" | "INVALID_FILE_TYPE" | "INVALID_FILE" | "IMAGE_PROCESSING_ERROR" |
-  "REGISTRATION_CLOSED" | "INVALID_NAME" | "INVALID_CONTEST" | "PHOTO_STORAGE_ERROR" | "REGISTRATION_ERROR" | "UPLOAD_ERROR";
+type ErrorCode = "FILE_TOO_LARGE" | "INVALID_FILE_TYPE" | "INVALID_FILE" | "EMPTY_FILE" | "IMAGE_PROCESSING_ERROR" | "IMAGE_TOO_MANY_PIXELS" |
+  "REGISTRATION_CLOSED" | "INVALID_NAME" | "INVALID_CONTEST" | "PHOTO_STORAGE_ERROR" | "STORAGE_LIMIT_EXCEEDED" | "REGISTRATION_ERROR" | "UPLOAD_ERROR" | "SERVICE_UNAVAILABLE";
 const messages: Record<ErrorCode, string> = {
   FILE_TOO_LARGE: "La fotografía supera el límite de 5 MB. Reduce su tamaño o calidad e inténtalo de nuevo. También puedes probar desde una computadora.",
   INVALID_FILE_TYPE: "El formato no es compatible. Selecciona una imagen JPG, PNG o WebP. Si usas iPhone, exporta la foto como JPG antes de subirla.",
-  INVALID_FILE: "No se pudo leer la fotografía. Selecciona otra imagen e inténtalo de nuevo.",
+  INVALID_FILE: "No se recibió una fotografía válida. Selecciona otra imagen.",
+  EMPTY_FILE: "La fotografía seleccionada está vacía. Elige otra imagen.",
+  IMAGE_TOO_MANY_PIXELS: "La fotografía tiene demasiada resolución. Reduce sus dimensiones o calidad e inténtalo de nuevo.",
   IMAGE_PROCESSING_ERROR: "No pudimos procesar esta imagen. Prueba con una versión de menor resolución o expórtala como JPG. También puedes intentar desde una computadora.",
   REGISTRATION_CLOSED: "Las inscripciones del concurso ya están cerradas.",
   INVALID_NAME: "El nombre debe tener entre 2 y 80 caracteres.",
   INVALID_CONTEST: "No encontramos el concurso. Actualiza la página e inténtalo de nuevo.",
-  PHOTO_STORAGE_ERROR: "No pudimos guardar la fotografía. Inténtalo de nuevo; si estás en un teléfono, prueba desde una computadora.",
+  PHOTO_STORAGE_ERROR: "No pudimos guardar la fotografía. Inténtalo de nuevo; si persiste, prueba desde una computadora.",
+  STORAGE_LIMIT_EXCEEDED: "La imagen procesada supera el límite de 5 MB. Reduce su calidad o resolución.",
+  SERVICE_UNAVAILABLE: "El servicio no está disponible temporalmente. Inténtalo nuevamente en unos minutos.",
   REGISTRATION_ERROR: "No pudimos completar el registro. Inténtalo de nuevo en unos momentos.",
   UPLOAD_ERROR: "No fue posible recibir la fotografía. Comprueba tu conexión, reduce el tamaño de la imagen o intenta desde una computadora."
 };
@@ -45,12 +49,15 @@ export async function POST(request: Request) {
     try { name = validateDisplayName(String(form.get("name") ?? "")); }
     catch { return failure("INVALID_NAME", 400, requestId); }
     const file = form.get("photo");
-    if (!(file instanceof File) || !file.size) return failure("INVALID_FILE", 400, requestId);
+    if (!(file instanceof File)) return failure("INVALID_FILE", 400, requestId);
+    if (!file.size) return failure("EMPTY_FILE", 400, requestId);
     if (file.size > MAX_FILE_SIZE) return failure("FILE_TOO_LARGE", 413, requestId);
     if (!ACCEPTED_TYPES.includes(file.type)) return failure("INVALID_FILE_TYPE", 415, requestId);
 
     stage = "contest";
-    const contest = await new SupabaseContestRepository().findById(contestId);
+    let contest;
+    try { contest = await new SupabaseContestRepository().findById(contestId); }
+    catch (error) { console.error("Photo registration: contest query failed", { requestId, error }); return failure("SERVICE_UNAVAILABLE", 503, requestId); }
     if (!contest || contest.phase !== "registration" || new Date() >= contest.registrationEndsAt) return failure("REGISTRATION_CLOSED", 409, requestId);
 
     stage = "process";
@@ -61,9 +68,11 @@ export async function POST(request: Request) {
         .webp({ quality: 82 }).toBuffer();
     } catch (error) {
       console.error("Photo registration: image processing failed", { requestId, stage, error });
-      return failure("IMAGE_PROCESSING_ERROR", 422, requestId);
+      const tooManyPixels = error instanceof Error && /pixel limit|input image exceeds pixel limit/i.test(error.message);
+      return failure(tooManyPixels ? "IMAGE_TOO_MANY_PIXELS" : "IMAGE_PROCESSING_ERROR", 422, requestId);
     }
 
+    if (image.length > MAX_FILE_SIZE) return failure("STORAGE_LIMIT_EXCEEDED", 413, requestId);
     imagePath = `${contestId}/${randomUUID()}.webp`;
     stage = "storage";
     const db = serverDatabase();
