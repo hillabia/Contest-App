@@ -3,36 +3,50 @@ import Link from "next/link";
 import { useState, type FormEvent } from "react";
 
 const MAX_FILE_SIZE = 5_000_000;
-const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
 const guidance = "Puedes reducir la resolución o calidad de la foto, guardarla como JPG o intentar subirla desde una computadora.";
 
-async function compressPhoto(file: File): Promise<File> {
-  if (!ACCEPTED_TYPES.includes(file.type)) {
-    throw new Error("Formato no compatible. Usa JPG, PNG o WebP. Si tu teléfono utiliza HEIC, expórtala como JPG.");
-  }
-  // Keep smaller files untouched; the server still normalizes them.
-  if (file.size <= 2_500_000) return file;
-  let bitmap: ImageBitmap | null = null;
+async function loadImage(file: File): Promise<{ source: CanvasImageSource; width: number; height: number; dispose: () => void }> {
   try {
-    bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
-    const maxSide = 1600;
-    const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error("No se pudo procesar la fotografía en este navegador.");
-    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    const toBlob = (quality: number) => new Promise<Blob | null>(resolve => canvas.toBlob(resolve, "image/jpeg", quality));
-    for (const quality of [0.82, 0.68, 0.5]) {
-      const blob = await toBlob(quality);
-      if (blob && blob.size < MAX_FILE_SIZE) {
-        return new File([blob], file.name.replace(/\.[^.]+$/, "") + "-optimizada.jpg", { type: "image/jpeg" });
+    const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+    return { source: bitmap, width: bitmap.width, height: bitmap.height, dispose: () => bitmap.close() };
+  } catch {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    try {
+      img.src = url;
+      await img.decode();
+      return { source: img, width: img.naturalWidth, height: img.naturalHeight, dispose: () => URL.revokeObjectURL(url) };
+    } catch {
+      URL.revokeObjectURL(url);
+      throw new Error("No pudimos abrir esta foto en tu teléfono. Si es HEIC, intenta compartirla o guardarla como JPG.");
+    }
+  }
+}
+async function compressPhoto(file: File): Promise<File> {
+  const type = file.type.toLowerCase();
+  if (!ACCEPTED_TYPES.includes(type)) throw new Error("Formato no compatible. Selecciona JPG, PNG, WebP o HEIC.");
+  if (file.size <= 2_500_000 && type !== "image/heic" && type !== "image/heif") return file;
+  const image = await loadImage(file);
+  try {
+    for (const maxSide of [1600, 1200, 900]) {
+      const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(image.width * scale));
+      canvas.height = Math.max(1, Math.round(image.height * scale));
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("No se pudo procesar la fotografía en este navegador.");
+      context.drawImage(image.source, 0, 0, canvas.width, canvas.height);
+      for (const quality of [0.82, 0.68, 0.5]) {
+        const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, "image/jpeg", quality));
+        if (blob && blob.type === "image/jpeg" && blob.size <= MAX_FILE_SIZE) {
+          return new File([blob], file.name.replace(/\.[^.]+$/, "") + "-optimizada.jpg", { type: "image/jpeg" });
+        }
       }
     }
-    throw new Error("La fotografía sigue siendo demasiado grande. Reduce su tamaño o inténtalo desde una computadora.");
+    throw new Error("La fotografía sigue siendo demasiado grande. Prueba con otra fotografía.");
   } finally {
-    bitmap?.close();
+    image.dispose();
   }
 }
 
@@ -50,7 +64,7 @@ export default function Participate() {
     setPhoto(file); setError(""); setErrorCode(""); setRequestId(""); setStatus("");
     if (!file) return;
     if (!ACCEPTED_TYPES.includes(file.type)) {
-      setError("Elige una fotografía JPG, PNG o WebP. Si tu teléfono usa HEIC, expórtala como JPG.");
+      setError("Elige una fotografía JPG, PNG, WebP o HEIC. Si HEIC no se puede abrir, compártela como JPG.");
       setErrorCode("INVALID_FILE_TYPE");
     } else if (file.size > MAX_FILE_SIZE) {
       setStatus("La foto es grande. Intentaremos comprimirla automáticamente antes de subirla.");
@@ -62,7 +76,7 @@ export default function Participate() {
     if (busy) return;
     setError(""); setErrorCode(""); setRequestId(""); setStatus("");
     if (!photo) { setError("Selecciona una fotografía."); return; }
-    if (!ACCEPTED_TYPES.includes(photo.type)) { setErrorCode("INVALID_FILE_TYPE"); setError("Elige una fotografía JPG, PNG o WebP. Si utilizas HEIC, expórtala como JPG."); return; }
+    if (!ACCEPTED_TYPES.includes(photo.type)) { setErrorCode("INVALID_FILE_TYPE"); setError("Elige una fotografía JPG, PNG, WebP o HEIC. Si HEIC no se puede abrir, compártela como JPG."); return; }
     setBusy(true);
     try {
       let prepared: File;
@@ -105,8 +119,8 @@ export default function Participate() {
     {code ? <section><h2>Registro completado</h2><p>Guarda este código. No volverá a mostrarse.</p><strong style={{ overflowWrap: "anywhere" }}>{code}</strong></section> :
       <form onSubmit={submit}>
         <p><label>Nombre<br/><input required minLength={2} maxLength={80} value={name} onChange={e => setName(e.target.value)} disabled={busy}/></label></p>
-        <p><label>Fotografía (JPG, PNG o WebP)<br/><input type="file" accept="image/jpeg,image/png,image/webp" required disabled={busy} onChange={e => onFileChange(e.target.files?.[0] ?? null)}/></label></p>
-        <p style={{ fontSize: 14 }}>Las fotografías grandes se comprimen automáticamente en tu dispositivo antes de subirlas. El límite final es de 5 MB. Si tu foto está en HEIC, expórtala como JPG.</p>
+        <p><label>Fotografía (JPG, PNG, WebP o HEIC)<br/><input type="file" accept="image/*,.heic,.heif" required disabled={busy} onChange={e => onFileChange(e.target.files?.[0] ?? null)}/></label></p>
+        <p style={{ fontSize: 14 }}>Elige una fotografía de la galería o toma una con la cámara. Las imágenes grandes se optimizan antes de enviarse (máximo final 5 MB).</p>
         {status && <p role="status">{status}</p>}
         <button disabled={busy || errorCode === "INVALID_FILE_TYPE"} type="submit">{busy ? "Procesando..." : "Registrar fotografía"}</button>
       </form>}
