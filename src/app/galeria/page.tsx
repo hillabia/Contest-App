@@ -15,5 +15,5 @@ export default function Gallery(){
   }catch{if(!cancelled)setMessage("No se pudo cargar la galería.");}
  })();return()=>{cancelled=true};},[]);
  return <main style={{maxWidth:900,margin:"3rem auto",padding:"1rem",fontFamily:"sans-serif"}}><Link href="/">← Inicio</Link><h1>Galería anónima</h1>
- {photos.length?<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:16}}>{photos.map(p=><img key={p.id} src={p.url} alt="Diseño participante" style={{width:"100%",aspectRatio:"1",objectFit:"cover",borderRadius:12}}/>)}</div>:<p>{message}</p>}</main>;
+ {photos.length?<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(min(100%,220px),1fr))",gap:16}}>{photos.map(p=><img key={p.id} src={p.url} alt="Diseño participante" style={{width:"100%",aspectRatio:"3 / 4",objectFit:"contain",background:"#160f22",borderRadius:12}}/>)}</div>:<p>{message}</p>}</main>;
 }

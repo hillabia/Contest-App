@@ -35,7 +35,7 @@ export default function Vote(){
  <button onClick={load} disabled={busy||code.length<12}>Entrar a votar</button></section>:
  <section><p>Ordena <strong>todas</strong> las fotografías: la primera recibe más puntos. Usa los botones para cambiar posiciones.</p>
  {photos.map((photo,i)=><article key={photo.id} style={{display:"flex",alignItems:"center",gap:16,padding:12,borderBottom:"1px solid #ccc"}}>
- <strong>{i+1}.</strong><img src={photo.url} alt={`Fotografía en posición ${i+1}`} style={{width:130,height:130,objectFit:"cover"}}/>
+ <strong>{i+1}.</strong><img src={photo.url} alt={`Fotografía en posición ${i+1}`} style={{width:110,height:150,objectFit:"contain",background:"#160f22",borderRadius:8,flexShrink:0,maxWidth:"38vw"}}/>
  <div><button aria-label={`Subir fotografía ${i+1}`} onClick={()=>move(i,-1)} disabled={i===0}>↑</button>
  <button aria-label={`Bajar fotografía ${i+1}`} onClick={()=>move(i,1)} disabled={i===photos.length-1}>↓</button></div></article>)}
  <button onClick={submit} disabled={busy||photos.length<2}>Confirmar voto definitivo</button>
