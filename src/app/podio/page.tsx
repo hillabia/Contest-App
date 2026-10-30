@@ -18,7 +18,7 @@ export default function PodiumPage(){
   <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:20}}>
    {winners.map((w,i)=><article key={w.id} style={{padding:16,border:"1px solid #ddd",borderRadius:12,textAlign:"center"}}>
     <h3>{["🥇 Primer lugar","🥈 Segundo lugar","🥉 Tercer lugar"][i]}</h3>
-    <img src={w.url} alt={"Fotografía ganadora del lugar "+(i+1)} style={{width:"100%",aspectRatio:"1",objectFit:"cover",borderRadius:8}}/>
+    <img src={w.url} alt={"Fotografía ganadora del lugar "+(i+1)} style={{width:"100%",aspectRatio:"3 / 4",objectFit:"contain",background:"#160f22",borderRadius:8}}/>
     <button type="button" aria-expanded={revealed.includes(w.id)} onClick={()=>setRevealed(s=>s.includes(w.id)?s.filter(id=>id!==w.id):[...s,w.id])} style={{marginTop:16,padding:12,width:"100%",cursor:"pointer"}}>
      {revealed.includes(w.id)?w.name:"Girar tarjeta y revelar nombre"}
     </button>
